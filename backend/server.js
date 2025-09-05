@@ -1,56 +1,116 @@
-const express = require("express");
-const multer = require("multer");
-const cors = require("cors");
-const path = require("path");
+const express = require('express');
+const cors = require('cors');
+const multer = require('multer');
+const { createClient } = require('@supabase/supabase-js');
+const dotenv = require('dotenv');
+const path = require('path');
+const fs = require('fs');
+
+dotenv.config({ path: path.join(__dirname, ".env") });
 
 const app = express();
-const PORT = 5000;
-
 app.use(cors());
 app.use(express.json());
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
-let reports = [];
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 
-// Multer setup for file uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "uploads/");
-  },
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + "-" + file.originalname);
-  },
-});
-const upload = multer({ storage });
+const upload = multer({ dest: 'uploads/' });
 
-// GET reports
-app.get("/api/reports", (req, res) => {
-  res.json(reports);
-});
+// POST /api/reports - create a new report
+app.post('/api/reports', upload.array('images'), async (req, res) => {
+  try {
+    const {
+      type, severity, description, location,
+      latitude, longitude, status, contact
+    } = req.body;
 
-// POST report (supports multiple images + description + geotag)
-app.post("/api/reports", upload.array("images", 6), (req, res) => {
-  const { latitude, longitude, description } = req.body;
-  const files = req.files || [];
-  if (!files.length) {
-    return res.status(400).json({ error: "No images uploaded" });
+    let imageUrls = [];
+    if (req.files && req.files.length > 0) {
+      for (const file of req.files) {
+        const ext = path.extname(file.originalname);
+        const dest = `reports/${Date.now()}_${file.originalname}`;
+        const fileBuffer = fs.readFileSync(file.path);
+
+        // Upload to Supabase Storage
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from(process.env.SUPABASE_BUCKET)
+          .upload(dest, fileBuffer, { contentType: file.mimetype });
+
+        if (uploadError) {
+          console.error(uploadError);
+          continue;
+        }
+
+        // Get public URL
+        const { data: publicUrlData } = supabase.storage
+          .from(process.env.SUPABASE_BUCKET)
+          .getPublicUrl(dest);
+
+        if (publicUrlData && publicUrlData.publicUrl) {
+          imageUrls.push(publicUrlData.publicUrl);
+        }
+
+        // Remove local file after upload
+        fs.unlinkSync(file.path);
+      }
+    }
+
+    // Insert report into Supabase table
+    const { data, error } = await supabase
+      .from('reports')
+      .insert([{
+        type,
+        severity,
+        description,
+        location,
+        latitude: parseFloat(latitude),
+        longitude: parseFloat(longitude),
+        status,
+        contact,
+        imageUrls,
+        timestamp: new Date().toISOString()
+      }])
+      .select();
+
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.json(data[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
   }
-
-  const imageUrls = files.map((f) => `/uploads/${f.filename}`);
-
-  const newReport = {
-    id: reports.length + 1,
-    imageUrls,
-    description: description || "",
-    latitude: latitude !== undefined ? parseFloat(latitude) : null,
-    longitude: longitude !== undefined ? parseFloat(longitude) : null,
-    timestamp: new Date(),
-  };
-
-  reports.push(newReport);
-  res.json({ message: "Report added successfully", report: newReport });
 });
 
-app.listen(PORT, "0.0.0.0", () => {
+// GET /api/reports - fetch all reports
+app.get('/api/reports', async (req, res) => {
+  try {
+    const { type, status } = req.query;
+    let query = supabase.from('reports').select('*');
+
+    if (type) query = query.eq('type', type);
+    if (status) query = query.eq('status', status);
+
+    query = query.order('timestamp', { ascending: false });
+
+    const { data, error } = await query;
+
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.json(data);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+console.log("SUPABASE_URL:", process.env.SUPABASE_URL);
+console.log("SUPABASE_SERVICE_KEY:", process.env.SUPABASE_SERVICE_KEY);
+
+// Start server
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
   console.log(`✅ Server running at http://localhost:${PORT}`);
 });

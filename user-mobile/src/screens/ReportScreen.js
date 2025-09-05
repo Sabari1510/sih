@@ -12,6 +12,9 @@ export default function ReportScreen({ navigation }) {
   const [description, setDescription] = useState('');
   const [location, setLocation] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [hazardType, setHazardType] = useState('other');
+  const [severity, setSeverity] = useState('unknown');
+  const [contact, setContact] = useState('');
 
   useEffect(() => {
     (async () => {
@@ -55,6 +58,9 @@ export default function ReportScreen({ navigation }) {
       fd.append('description', description);
       fd.append('latitude', String(location.latitude));
       fd.append('longitude', String(location.longitude));
+      fd.append('type', hazardType);
+      fd.append('severity', severity);
+      fd.append('contact', contact);
 
       const res = await fetch(`${API_BASE}/api/reports`, { method: 'POST', body: fd });
       const json = await res.json();
@@ -62,6 +68,9 @@ export default function ReportScreen({ navigation }) {
       Alert.alert('Success', 'Report submitted successfully.');
       setPhotos([]);
       setDescription('');
+      setHazardType('other');
+      setSeverity('unknown');
+      setContact('');
       if (cameraRef.current?.resumePreview) { try { await cameraRef.current.resumePreview(); } catch {} }
       if (navigation?.goBack) navigation.goBack();
     } catch (e) {
@@ -90,6 +99,17 @@ export default function ReportScreen({ navigation }) {
           ))}
         </ScrollView>
       )}
+      <Text style={styles.label}>Hazard Type</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.typeRow}>
+        {['tsunami','storm_surge','high_waves','swell_surge','coastal_flooding','abnormal_sea','pollution','other'].map((t)=>(
+          <TouchableOpacity key={t} style={[styles.chip, hazardType===t && styles.chipActive]} onPress={()=>setHazardType(t)}>
+            <Text style={[styles.chipText, hazardType===t && styles.chipTextActive]}>{t.replace('_',' ')}</Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+
+      <TextInput placeholder="Severity (e.g., low/medium/high)" placeholderTextColor="#607D8B" value={severity} onChangeText={setSeverity} style={styles.input} />
+      <TextInput placeholder="Your contact (optional)" placeholderTextColor="#607D8B" value={contact} onChangeText={setContact} style={styles.input} />
       <TextInput placeholder="Add description" placeholderTextColor="#607D8B" value={description} onChangeText={setDescription} style={styles.input} />
       <View style={styles.controls}>
         <TouchableOpacity style={styles.button} onPress={takePhoto} disabled={!isCameraReady || submitting}><Text style={styles.buttonText}>📸 Take Photo</Text></TouchableOpacity>
@@ -106,6 +126,12 @@ const styles = StyleSheet.create({
   blackText: { color: '#000000' },
   title: { fontSize: 22, fontWeight: 'bold', color: '#000000', margin: 16 },
   camera: { height: 280, borderRadius: 12, marginHorizontal: 16, overflow: 'hidden' },
+  label: { marginHorizontal: 16, marginTop: 10, color: '#000000', fontWeight: '600' },
+  typeRow: { marginHorizontal: 16, marginTop: 6 },
+  chip: { backgroundColor: '#E3F2FD', paddingVertical: 8, paddingHorizontal: 10, borderRadius: 16, marginRight: 8 },
+  chipActive: { backgroundColor: '#1565C0' },
+  chipText: { color: '#0D47A1' },
+  chipTextActive: { color: '#FFFFFF', fontWeight: '700' },
   previewRow: { maxHeight: 140, backgroundColor: '#E3F2FD', marginTop: 8 },
   previewItem: { margin: 8, alignItems: 'center' },
   preview: { width: 120, height: 120, borderRadius: 8 },
